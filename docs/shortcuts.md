@@ -11,6 +11,7 @@
 | ⌘⌥ + arrows  | Move focus between panes                             |
 | ⌘⇧[ / ⌘⇧]    | Previous / next tab                                  |
 | ⌘⇧↩          | Maximise the focused pane                            |
+| ⌘⌃=          | Even out the panes: every row and pane the same size |
 | ⌘⇧A          | Jump to the next agent that needs you                |
 | ⌘B / ⌘J      | Toggle the sidebar / the editor                      |
 | ⌘O           | Add a repo                                           |

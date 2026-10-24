@@ -413,6 +413,14 @@ impl Layout {
         self.maximized = if self.maximized.is_some() { None } else { self.focused };
     }
 
+    /// Every row the same height and every pane in a row the same width, undoing dragged dividers.
+    pub fn even_out(&mut self) {
+        even_out(self.rows.iter_mut().map(|row| &mut row.size));
+        for row in &mut self.rows {
+            even_out(row.cells.iter_mut().map(|cell| &mut cell.size));
+        }
+    }
+
     pub fn resize_rows(&mut self, sizes: &[f32]) {
         for (row, size) in self.rows.iter_mut().zip(sizes) {
             row.size = *size;
@@ -430,7 +438,7 @@ impl Layout {
 
 /// The horizontal centre of each cell in a row, from 0 to 1.
 /// Every pane in a row, or every row, the same size: what a grid gets whenever a pane comes or
-/// goes. Sizes dragged by hand last until then.
+/// goes, or Even out panes is asked for. Sizes dragged by hand last until then.
 fn even_out<'a>(sizes: impl Iterator<Item = &'a mut f32>) {
     let mut sizes: Vec<&mut f32> = sizes.collect();
     #[expect(clippy::cast_precision_loss, reason = "a row holds a handful of panes")]
@@ -514,6 +522,21 @@ mod tests {
         }
         let sizes: Vec<f32> = layout.rows[0].cells.iter().map(|c| c.size).collect();
         assert!(sizes.iter().all(|size| (size - 0.2).abs() < 1e-6), "{sizes:?}");
+    }
+
+    #[test]
+    fn evens_out_every_row_and_pane_after_dragging() {
+        let mut layout = Layout::default();
+        layout.add_tab(A, None);
+        layout.split_right(B, None);
+        layout.split_down(C, None);
+        layout.resize_rows(&[0.8, 0.2]);
+        let row = layout.rows[0].id;
+        layout.resize_cells(row, &[0.9, 0.1]);
+        layout.even_out();
+        let rows: Vec<f32> = layout.rows.iter().map(|r| r.size).collect();
+        let cells: Vec<f32> = layout.rows[0].cells.iter().map(|c| c.size).collect();
+        assert_eq!((rows, cells), (vec![0.5, 0.5], vec![0.5, 0.5]));
     }
 
     #[test]

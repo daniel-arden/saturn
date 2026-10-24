@@ -59,11 +59,12 @@ use gpui_kit::{
 
 use crate::app_view::AppView;
 use crate::workspace::{
-    BestOfN, CloseTab, CommandPalette, CompareAttempts, CompareWith, Copy, CreateRecipe, EditPrBody, GoToFile, NewTab,
-    NextAttention, NextTab, OpenProject, OpenSettings, OpenTicketPicker, Paste, PreviousTab, RunCheck, SaveFile,
-    SearchSessions, SendToSeveral, SetUpWorktree, ShowContext, ShowHistory, ShowImpact, ShowLineage, ShowPictures,
-    ShowPreview, ShowProblems, ShowRoutines, ShowSchema, ShowWaiting, ShowWorktrees, SplitDown, SplitRight, StartApp,
-    TeachRepo, TextBigger, TextReset, TextSmaller, ToggleEditor, ToggleMaximize, ToggleSidebar, ToggleTickets,
+    BestOfN, CloseTab, CommandPalette, CompareAttempts, CompareWith, Copy, CreateRecipe, EditPrBody, EvenOutPanes,
+    GoToFile, NewTab, NextAttention, NextTab, OpenProject, OpenSettings, OpenTicketPicker, Paste, PreviousTab,
+    RunCheck, SaveFile, SearchSessions, SendToSeveral, SetUpWorktree, ShowContext, ShowHistory, ShowImpact,
+    ShowLineage, ShowPictures, ShowPreview, ShowProblems, ShowRoutines, ShowSchema, ShowWaiting, ShowWorktrees,
+    SplitDown, SplitRight, StartApp, TeachRepo, TextBigger, TextReset, TextSmaller, ToggleEditor, ToggleMaximize,
+    ToggleSidebar, ToggleTickets,
 };
 
 actions!(saturn, [Quit, CheckForUpdates]);
@@ -118,6 +119,7 @@ pub fn set_menus(cx: &mut App) {
             MenuItem::action("Next Tab", NextTab),
             MenuItem::action("Previous Tab", PreviousTab),
             MenuItem::action("Maximise Pane", ToggleMaximize),
+            MenuItem::action("Even Out Panes", EvenOutPanes),
             MenuItem::action("Next Agent Needing You", NextAttention),
         ]),
         // Every feature has a place here, so none is found only by typing in the command palette.

@@ -69,7 +69,7 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
 - Split right (⌘D) or down (⌘⇧D), or drag a tab onto a pane's edge to split it there. Tabs in every
   pane. Maximise the focused pane over everything with its button or ⌘⇧↩. Panes share the space
   evenly whenever one opens or closes; drag a divider to change that, or double-click it to even
-  out its two panes.
+  out its two panes. ⌘⌃= evens out them all.
 - A real terminal underneath (alacritty's engine), so TUIs, colours and the mouse work as they should.
 - Drop a file, a screenshot say, on a terminal to type its path, so the agent attaches it; the
   terminal it will land in lights up while you drag. Pasting works the same: copied files (from

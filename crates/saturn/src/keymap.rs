@@ -7,10 +7,10 @@ use std::collections::BTreeMap;
 use gpui_kit::{Action, App, KeyBinding, Keystroke, SharedString, Unbind};
 
 use crate::workspace::{
-    CloseTab, CommandPalette, FocusDown, FocusLeft, FocusPane1, FocusPane2, FocusPane3, FocusPane4, FocusPane5,
-    FocusPane6, FocusPane7, FocusPane8, FocusPane9, FocusRight, FocusUp, GoToFile, NewTab, NextAttention, NextTab,
-    OpenProject, OpenSettings, OpenTicketPicker, PreviousTab, SaveFile, SplitDown, SplitRight, TextBigger, TextReset,
-    TextSmaller, ToggleEditor, ToggleMaximize, ToggleSidebar, ToggleTickets,
+    CloseTab, CommandPalette, EvenOutPanes, FocusDown, FocusLeft, FocusPane1, FocusPane2, FocusPane3, FocusPane4,
+    FocusPane5, FocusPane6, FocusPane7, FocusPane8, FocusPane9, FocusRight, FocusUp, GoToFile, NewTab, NextAttention,
+    NextTab, OpenProject, OpenSettings, OpenTicketPicker, PreviousTab, SaveFile, SplitDown, SplitRight, TextBigger,
+    TextReset, TextSmaller, ToggleEditor, ToggleMaximize, ToggleSidebar, ToggleTickets,
 };
 
 /// One shortcut a user can change.
@@ -41,6 +41,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
     shortcut!("next-tab", "Next tab", "Terminals", ["cmd-shift-]"], NextTab),
     shortcut!("previous-tab", "Previous tab", "Terminals", ["cmd-shift-["], PreviousTab),
     shortcut!("maximize", "Maximise the pane", "Terminals", ["cmd-shift-enter"], ToggleMaximize),
+    shortcut!("even-out", "Even out the panes", "Terminals", ["cmd-ctrl-="], EvenOutPanes),
     shortcut!("next-attention", "Next agent that needs you", "Terminals", ["cmd-shift-a"], NextAttention),
     shortcut!("focus-left", "Pane to the left", "Moving around", ["cmd-alt-left"], FocusLeft),
     shortcut!("focus-right", "Pane to the right", "Moving around", ["cmd-alt-right"], FocusRight),

@@ -69,6 +69,7 @@ actions!(
         FocusUp,
         FocusDown,
         ToggleMaximize,
+        EvenOutPanes,
         NextAttention,
         Paste,
         Copy,
@@ -162,6 +163,7 @@ pub fn commands() -> Vec<(&'static str, &'static str, Box<dyn gpui_kit::Action>)
         ("Next tab", "square-arrow-right", Box::new(NextTab)),
         ("Previous tab", "arrow-left", Box::new(PreviousTab)),
         ("Maximise the pane", "maximize-2", Box::new(ToggleMaximize)),
+        ("Even out the panes", "columns-2", Box::new(EvenOutPanes)),
         ("Go to the next agent that needs you", "bot", Box::new(NextAttention)),
         ("New agent", "square-plus", Box::new(OpenTicketPicker)),
         ("Send to several agents", "send", Box::new(SendToSeveral)),
@@ -4616,6 +4618,9 @@ impl Render for Workspace {
             }))
             .on_action(cx.listener(|this, _: &ToggleMaximize, window, cx| {
                 this.update_layout(window, cx, Layout::toggle_maximize);
+            }))
+            .on_action(cx.listener(|this, _: &EvenOutPanes, window, cx| {
+                this.update_layout(window, cx, Layout::even_out);
             }))
             .on_action(cx.listener(|this, _: &NextAttention, window, cx| this.next_attention(window, cx)))
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
