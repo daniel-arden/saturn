@@ -9,11 +9,10 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::resizable::{h_resizable, resizable_panel, v_resizable};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::{
-    Action, Animation, AnimationExt as _, AnyElement, AppContext as _, Bounds, ClickEvent, Context, CursorStyle,
-    DragMoveEvent, Entity, FocusHandle, Focusable as _, FontWeight, Hsla, InteractiveElement as _, IntoElement,
-    MouseButton, ParentElement as _, PathPromptOptions, Pixels, Point, PromptLevel, Render,
-    StatefulInteractiveElement as _, Styled as _, Subscription, Window, actions, bounce, div, ease_in_out,
-    prelude::FluentBuilder as _, px, relative,
+    Action, AnyElement, AppContext as _, Bounds, ClickEvent, Context, CursorStyle, DragMoveEvent, Entity, FocusHandle,
+    Focusable as _, FontWeight, Hsla, InteractiveElement as _, IntoElement, MouseButton, ParentElement as _,
+    PathPromptOptions, Pixels, Point, PromptLevel, Render, StatefulInteractiveElement as _, Styled as _, Subscription,
+    Window, actions, div, prelude::FluentBuilder as _, px, relative,
 };
 use saturn_bridge::{Bridge, HookCall};
 use saturn_core::agent_state::{AgentState, tab_title};
@@ -935,16 +934,6 @@ pub fn state_color(state: AgentState) -> Hsla {
 
 fn status_dot(state: AgentState) -> impl IntoElement {
     div().size(px(8.)).flex_none().rounded_full().bg(state_color(state))
-}
-
-/// `glow-needs-you` as it breathes: `t` from 0 (the token itself) to 1 (wider and brighter).
-fn breathing_glow(t: f32) -> Vec<saturn_design::Shadow> {
-    let mut glow = shadow::GLOW_NEEDS_YOU.get().to_vec();
-    if let Some(halo) = glow.get_mut(1) {
-        halo.blur += 4. * t;
-        halo.color.alpha += 0.12 * t;
-    }
-    glow
 }
 
 /// Moves the divider after `index` to `at` (0–1 across the container), keeping both neighbours
@@ -4089,16 +4078,7 @@ impl Workspace {
         if let Some(glow) = glow {
             pane = pane.border_color(gpui_kit::transparent_black()).shadow(theme::shadows(glow));
         }
-        if needs_you {
-            // Needs you breathes, slowly, so it is seen from the corner of the eye without flashing.
-            return pane
-                .with_animation(
-                    ("breathe", cell_id.key()),
-                    Animation::new(Duration::from_millis(2400)).repeat().with_easing(bounce(ease_in_out)),
-                    |pane, t| pane.shadow(theme::layers(&breathing_glow(t))),
-                )
-                .into_any_element();
-        }
+        // The ring is lit and still: nothing redraws a pane while it waits for you.
         pane.into_any_element()
     }
 

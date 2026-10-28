@@ -509,7 +509,7 @@
 }
 
 /* Terminal pane: a card with the tabs, chips and buttons in its strip, and the terminal under a
-   hairline. The ring, by priority: needs you (orange, breathing), your turn (green), focus
+   hairline. The ring, by priority: needs you (orange), your turn (green), focus
    (blue). A ring replaces the card's edge. */
 .sat-pane {
   position: relative;
@@ -532,15 +532,6 @@
 }
 .sat-pane[data-attention='needs-you'] {
   box-shadow: var(--glow-needs-you);
-  animation: sat-breathe 2.4s var(--ease-in-out) infinite alternate;
-}
-/* Breathing widens the halo by 4px and brightens it by 12%. */
-@keyframes sat-breathe {
-  to {
-    box-shadow:
-      0 0 0 1px var(--status-needs-you),
-      0 0 16px color-mix(in oklab, var(--status-needs-you) 40%, transparent);
-  }
 }
 .sat-pane__head {
   display: flex;
