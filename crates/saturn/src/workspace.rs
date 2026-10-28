@@ -48,7 +48,7 @@ use crate::editor_view::EditorView;
 use crate::files_view::{FilesEvent, FilesView};
 use crate::menu;
 use crate::review_comments::{SendToAgent, Touched};
-use crate::session::{self, SavedGrid, SavedTab};
+use crate::session::{self, SavedGrid, SavedPage, SavedTab};
 use crate::settings::{self, AppearanceSetting, Panels, Settings};
 use crate::status_bar::StatusBar;
 use crate::theme::{self, len};
@@ -279,7 +279,12 @@ pub struct Workspace {
     projects: Vec<PathBuf>,
     /// The selected repo: where new tabs and ticket worktrees go, and whose ticket settings apply.
     project: PathBuf,
+    /// The repo whose grid is showing. Each repo has its own, as a browser tab has its own page.
+    page: PathBuf,
+    /// The grid showing.
     layout: Layout,
+    /// The other repos' grids, put aside while another shows; their terminals keep running.
+    pages: HashMap<PathBuf, Layout>,
     terminals: HashMap<TabId, Entity<TerminalView>>,
     /// Names typed by hand; they win over the terminal's own title.
     names: HashMap<TabId, String>,
@@ -1133,8 +1138,10 @@ impl Workspace {
             follow_pane: false,
             editor,
             projects: vec![project.clone()],
+            page: project.clone(),
             project,
             layout: Layout::default(),
+            pages: HashMap::new(),
             terminals: HashMap::new(),
             names: HashMap::new(),
             unseen: HashSet::new(),
@@ -1342,6 +1349,13 @@ impl Workspace {
     /// stops the sidebar following panes, so the choice sticks.
     pub fn select_project(&mut self, project: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         self.follow_pane = false;
+        self.switch_to(project, window, cx);
+        self.after_layout_change(window, cx);
+    }
+
+    /// Shows `project` in the sidebar, and its own grid in place of the one showing.
+    fn switch_to(&mut self, project: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_page(&project);
         self.project = project;
         if !self.roots.contains_key(&self.project) {
             let views = Self::root_views(&self.project, window, cx);
@@ -1351,6 +1365,27 @@ impl Workspace {
         let root = self.root.clone();
         self.status_bar.update(cx, |bar, cx| bar.set_root(&root, cx));
         cx.notify();
+    }
+
+    /// Puts the grid showing aside and shows `project`'s, empty if it has none yet.
+    fn show_page(&mut self, project: &Path) {
+        if self.page == project {
+            return;
+        }
+        let grid = self.pages.remove(project).unwrap_or_default();
+        let hidden = std::mem::replace(&mut self.layout, grid);
+        if !hidden.is_empty() {
+            self.pages.insert(self.page.clone(), hidden);
+        }
+        project.clone_into(&mut self.page);
+        // Cells are numbered per grid: a menu or a drop meant for one isn't the other's.
+        self.open_menu = None;
+        self.drop_target = None;
+    }
+
+    /// Every tab of the window: the grid showing's, then the other repos'.
+    fn all_tabs(&self) -> Vec<TabId> {
+        self.layout.tabs().chain(self.pages.values().flat_map(Layout::tabs)).collect()
     }
 
     /// Adds a repo to the window (or selects it, if it's here already).
@@ -1366,18 +1401,22 @@ impl Workspace {
         self.save_session(cx);
     }
 
-    /// Takes a repo out of the window's list. Its panes stay where they are.
+    /// Takes a repo out of the window's list. Its panes join the grid showing, still running.
     fn remove_project(&mut self, project: &Path, window: &mut Window, cx: &mut Context<Self>) {
         if self.projects.len() < 2 {
             return;
         }
         self.projects.retain(|p| p != project);
-        if self.project == project {
+        if self.page == project || self.project == project {
             let first = self.projects[0].clone();
-            self.select_project(first, window, cx);
+            self.switch_to(first, window, cx);
         }
-        self.save_session(cx);
-        cx.notify();
+        if let Some(left) = self.pages.remove(project) {
+            for tab in left.tabs() {
+                self.layout.add_tab(tab, None);
+            }
+        }
+        self.after_layout_change(window, cx);
     }
 
     pub fn clickup(&self) -> &ClickUpState {
@@ -1799,7 +1838,7 @@ impl Workspace {
             .iter()
             .map(|folder| {
                 let folder = folder.canonicalize().unwrap_or_else(|_| folder.clone());
-                self.layout.tabs().find_map(|tab| {
+                self.all_tabs().into_iter().find_map(|tab| {
                     let view = self.terminals.get(&tab)?.read(cx);
                     let cwd = view.cwd.canonicalize().unwrap_or_else(|_| view.cwd.clone());
                     cwd.starts_with(&folder).then_some((tab, view.state))
@@ -1840,8 +1879,8 @@ impl Workspace {
             view.read(cx).foreground_pid().and_then(process_name).is_some_and(|name| AGENTS.contains(&name.as_str()))
         };
         let agents: Vec<TabId> = self
-            .layout
-            .tabs()
+            .all_tabs()
+            .into_iter()
             .filter(|tab| self.terminals.get(tab).is_some_and(|view| works_there(view, cx) && runs_an_agent(view, cx)))
             .collect();
         let target = self.layout.focused_tab().filter(|tab| agents.contains(tab)).or_else(|| agents.first().copied());
@@ -1852,7 +1891,7 @@ impl Workspace {
                     view.write(b"\r".to_vec());
                 });
             }
-            self.update_layout(window, cx, |layout| layout.activate_tab(tab));
+            self.go_to_tab(tab, window, cx);
         } else {
             let Some(tab) = self.spawn_terminal(&checkout, window, cx) else { return };
             if self.layout.is_empty() {
@@ -2317,8 +2356,12 @@ impl Workspace {
         true
     }
 
-    /// Brings a tab to the front and gives it the keyboard.
+    /// Brings a tab to the front and gives it the keyboard, showing its repo's grid if another shows.
     pub fn go_to_tab(&mut self, tab: TabId, window: &mut Window, cx: &mut Context<Self>) {
+        let page = self.pages.iter().find(|(_, grid)| grid.tabs().any(|t| t == tab)).map(|(page, _)| page.clone());
+        if let Some(page) = page {
+            self.switch_to(page, window, cx);
+        }
         self.update_layout(window, cx, |layout| layout.activate_tab(tab));
     }
 
@@ -2493,7 +2536,10 @@ impl Workspace {
 
     /// The tickets that have a pane working on them, by key.
     pub fn tickets_with_agents(&self, cx: &gpui_kit::App) -> HashSet<String> {
-        self.layout.tabs().filter_map(|tab| self.ticket_of(tab, cx).map(|ticket| ticket.key().to_owned())).collect()
+        self.all_tabs()
+            .into_iter()
+            .filter_map(|tab| self.ticket_of(tab, cx).map(|ticket| ticket.key().to_owned()))
+            .collect()
     }
 
     /// The pull request a tab works on.
@@ -2989,9 +3035,43 @@ impl Workspace {
                 self.roots.insert(project.clone(), views);
             }
         }
+        let home = self.project.clone();
+        let tabs = self.restore_tabs(&saved.tabs, &home, window, cx);
+        let mut restored = !tabs.is_empty();
+        if restored {
+            self.layout = Layout::from_shape(&saved.shape, &tabs);
+        }
+        for page in &saved.pages {
+            if !self.projects.contains(&page.project) {
+                continue;
+            }
+            let tabs = self.restore_tabs(&page.tabs, &page.project, window, cx);
+            if !tabs.is_empty() {
+                restored = true;
+                self.pages.insert(page.project.clone(), Layout::from_shape(&page.shape, &tabs));
+            }
+        }
+        if !restored {
+            return false;
+        }
+        if let Some(shown) = saved.shown.filter(|shown| self.projects.contains(shown)) {
+            self.switch_to(shown, window, cx);
+        }
+        self.after_layout_change(window, cx);
+        true
+    }
+
+    /// Starts a grid's saved tabs again, each in its folder (or `fallback`, when that's gone).
+    fn restore_tabs(
+        &mut self,
+        saved: &[SavedTab],
+        fallback: &Path,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<TabId> {
         let mut tabs = Vec::new();
-        for saved_tab in &saved.tabs {
-            let cwd = if saved_tab.cwd.is_dir() { saved_tab.cwd.clone() } else { self.project.clone() };
+        for saved_tab in saved {
+            let cwd = if saved_tab.cwd.is_dir() { saved_tab.cwd.clone() } else { fallback.to_owned() };
             let Some(tab) = self.spawn_terminal(&cwd, window, cx) else { continue };
             if let Some(name) = &saved_tab.name {
                 self.names.insert(tab, name.clone());
@@ -3018,32 +3098,45 @@ impl Workspace {
             }
             tabs.push(tab);
         }
-        if tabs.is_empty() {
-            return false;
-        }
-        self.layout = Layout::from_shape(&saved.shape, &tabs);
-        self.after_layout_change(window, cx);
-        true
+        tabs
     }
 
-    /// Remembers the grid for the next start.
+    /// Remembers every repo's grid for the next start, and which one showed.
     fn save_session(&self, cx: &gpui_kit::App) {
-        let tabs: Vec<TabId> = self.layout.tabs().collect();
         let home = &self.projects[0];
-        let grid = (!tabs.is_empty()).then(|| SavedGrid {
-            projects: self.projects[1..].to_vec(),
-            shape: self.layout.shape(),
-            tabs: tabs
-                .iter()
-                .map(|tab| SavedTab {
-                    cwd: self.terminals.get(tab).map_or_else(|| self.project.clone(), |view| view.read(cx).cwd.clone()),
-                    name: self.names.get(tab).cloned(),
-                    session: self.sessions.get(tab).map(|(_, id)| id.clone()),
-                    agent: self.sessions.get(tab).map(|(agent, _)| *agent),
+        let empty = Layout::default();
+        let grid_of = |project: &Path| if self.page == project { Some(&self.layout) } else { self.pages.get(project) };
+        let home_grid = grid_of(home).unwrap_or(&empty);
+        let pages: Vec<SavedPage> = self.projects[1..]
+            .iter()
+            .filter_map(|project| {
+                let grid = grid_of(project).filter(|grid| !grid.is_empty())?;
+                Some(SavedPage {
+                    project: project.clone(),
+                    shape: grid.shape(),
+                    tabs: self.saved_tabs(grid, project, cx),
                 })
-                .collect(),
+            })
+            .collect();
+        let grid = (!home_grid.is_empty() || !pages.is_empty()).then(|| SavedGrid {
+            projects: self.projects[1..].to_vec(),
+            shape: home_grid.shape(),
+            tabs: self.saved_tabs(home_grid, home, cx),
+            pages,
+            shown: (self.page != *home).then(|| self.page.clone()),
         });
         session::save(home, grid);
+    }
+
+    fn saved_tabs(&self, grid: &Layout, project: &Path, cx: &gpui_kit::App) -> Vec<SavedTab> {
+        grid.tabs()
+            .map(|tab| SavedTab {
+                cwd: self.terminals.get(&tab).map_or_else(|| project.to_owned(), |view| view.read(cx).cwd.clone()),
+                name: self.names.get(&tab).cloned(),
+                session: self.sessions.get(&tab).map(|(_, id)| id.clone()),
+                agent: self.sessions.get(&tab).map(|(agent, _)| *agent),
+            })
+            .collect()
     }
 
     /// Opens a terminal next to a given cell (from its header buttons).
@@ -3225,6 +3318,10 @@ impl Workspace {
         self.names.remove(&tab);
         self.checkouts.remove(&tab);
         self.layout.remove_tab(tab);
+        for grid in self.pages.values_mut() {
+            grid.remove_tab(tab);
+        }
+        self.pages.retain(|_, grid| !grid.is_empty());
         self.report_attention(window, cx);
         self.after_layout_change(window, cx);
     }
@@ -3292,7 +3389,7 @@ impl Workspace {
         })
     }
 
-    fn tab_state(&self, tab: TabId, cx: &Context<Self>) -> AgentState {
+    fn tab_state(&self, tab: TabId, cx: &gpui_kit::App) -> AgentState {
         self.terminals.get(&tab).map_or(AgentState::Shell, |view| view.read(cx).state)
     }
 
@@ -4295,7 +4392,12 @@ impl Workspace {
         let removable = self.projects.len() > 1;
         let mut track = chrome::track();
         for (index, project) in self.projects.iter().enumerate() {
-            let selected = *project == self.project;
+            let selected = *project == self.page;
+            // A repo out of sight whose agents wait for you says so, as a browser tab's title does.
+            let waiting = self.pages.get(project).and_then(|grid| {
+                let states: Vec<AgentState> = grid.tabs().map(|tab| self.tab_state(tab, cx)).collect();
+                [AgentState::NeedsYou, AgentState::YourTurn].into_iter().find(|state| states.contains(state))
+            });
             let name = project.file_name().map_or_else(|| "/".to_owned(), |name| name.to_string_lossy().into_owned());
             let picked = project.clone();
             let removed = project.clone();
@@ -4308,6 +4410,7 @@ impl Workspace {
                     .group(group.clone())
                     .px(len(space::SPACE_3))
                     .text_color(theme::color(if selected { color::INK } else { color::INK_MUTED }))
+                    .when_some(waiting, |item, state| item.child(status_dot(state)))
                     .child(name)
                     // On hover only, floating over the tab's end, so a hidden ✕ takes no room.
                     .when(removable, |item| {
@@ -4333,7 +4436,7 @@ impl Workspace {
                                 .invisible()
                                 .group_hover(group, gpui_kit::Styled::visible)
                                 .child(chrome::icon("x", 11., theme::color(color::INK_MUTED)))
-                                .tooltip(chrome::tip("Close this repo here (its terminals keep running)"))
+                                .tooltip(chrome::tip("Close this repo here (its terminals move to the one showing)"))
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     cx.stop_propagation();
                                     this.remove_project(&removed, window, cx);
@@ -4429,7 +4532,7 @@ impl Workspace {
     }
 
     fn next_attention(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let order: Vec<TabId> = self.layout.tabs().collect();
+        let order = self.all_tabs();
         let start =
             self.layout.focused_tab().and_then(|front| order.iter().position(|t| *t == front)).map_or(0, |i| i + 1);
         let target = order
@@ -4440,7 +4543,7 @@ impl Workspace {
             .find(|tab| self.tab_state(**tab, cx).asks_for_you())
             .copied();
         if let Some(tab) = target {
-            self.update_layout(window, cx, |layout| layout.activate_tab(tab));
+            self.go_to_tab(tab, window, cx);
         }
     }
 

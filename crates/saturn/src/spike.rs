@@ -8,7 +8,8 @@
 //!   (`SATURN_REVIEW_COMMENT="12:text"` comments on its line 12; `SATURN_REVIEW_SEND=1` sends it;
 //!   `SATURN_REVIEW_PICK=12` clicks line 12, `SATURN_REVIEW_ACT=stage|revert|undo` presses that);
 //!   `SATURN_COMPARE=main` reviews everything that differs from `main`.
-//! - `SATURN_MORE_REPOS=a:b` adds more repos to the window, as ⌘O would; `SATURN_FAKE_AGENTS=1`
+//! - `SATURN_MORE_REPOS=a:b` adds more repos to the window, as ⌘O would (`SATURN_SHOW_REPO=a`
+//!   clicks that repo's tab after 3 seconds); `SATURN_FAKE_AGENTS=1`
 //!   gives the panes made-up agents and pull requests (`SATURN_FAKE_STATES=working,needs-you,your-turn`
 //!   sets their states in order); `SATURN_HISTORY=1` opens the History tab, `SATURN_IMPACT=1` the Impact tab (focused on `SATURN_IMPACT_FOCUS`), `SATURN_SCHEMA=1`
 //!   the database diagram, `SATURN_LINEAGE=1` the dbt lineage graph; `SATURN_LSP_PROBE=line:col` asks the open file's language server about
@@ -85,6 +86,17 @@ pub fn placement(index: usize, panes: usize) -> Placement {
     }
 }
 
+/// Clicks the tab of the repo `SATURN_SHOW_REPO` names, later than the panes' made-up states, so
+/// the repo left behind shows what waits in it.
+fn show_repo(window: &mut Window, cx: &mut Context<Workspace>) {
+    let Some(path) = std::env::var_os("SATURN_SHOW_REPO").map(std::path::PathBuf::from) else { return };
+    cx.spawn_in(window, async move |workspace, cx| {
+        cx.background_executor().timer(Duration::from_secs(3)).await;
+        let _ = workspace.update_in(cx, |workspace, window, cx| workspace.select_project(path, window, cx));
+    })
+    .detach();
+}
+
 pub fn start(workspace: &Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
     if let Ok(command) = std::env::var("SATURN_COMMAND") {
         let tabs: Vec<TabId> = (1..=panes().unwrap_or(0) as u64).map(TabId).collect();
@@ -150,6 +162,7 @@ pub fn start(workspace: &Workspace, window: &mut Window, cx: &mut Context<Worksp
         let first = workspace.project_path().to_owned();
         cx.defer_in(window, move |workspace, window, cx| workspace.select_project(first, window, cx));
     }
+    show_repo(window, cx);
     if let Some((line, character)) =
         std::env::var("SATURN_LSP_PROBE").ok().and_then(|at| at.split_once(':').map(|(l, c)| (l.parse(), c.parse())))
         && let (Ok(line), Ok(character)) = (line, character)

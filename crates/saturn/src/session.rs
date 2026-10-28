@@ -1,5 +1,5 @@
 //! The window as it was, per project, so Saturn opens where it left off: the repos it held, the
-//! shape of the grid, and for each tab its folder, the name typed for it, and the agent's session
+//! shape of each one's grid, and for each tab its folder, the name typed for it, and the agent's session
 //! it was running (Claude Code's or Codex's).
 //! Kept in `~/Library/Application Support/Saturn/sessions.json`.
 
@@ -15,9 +15,30 @@ pub struct SavedGrid {
     /// The other repos the window held, after the one it's saved under.
     #[serde(default)]
     pub projects: Vec<PathBuf>,
+    /// The grid of the repo it's saved under; before each repo had its own, every tab was here.
     pub shape: Shape,
     /// One per tab, in the order the shape lists them.
     pub tabs: Vec<SavedTab>,
+    /// The grids of the other repos that had panes.
+    #[serde(default)]
+    pub pages: Vec<SavedPage>,
+    /// The repo that was showing, when it wasn't the one it's saved under.
+    #[serde(default)]
+    pub shown: Option<PathBuf>,
+}
+
+/// One repo's own grid, put aside while another repo showed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SavedPage {
+    pub project: PathBuf,
+    pub shape: Shape,
+    pub tabs: Vec<SavedTab>,
+}
+
+impl SavedPage {
+    fn fits(&self) -> bool {
+        !self.tabs.is_empty() && self.shape.tab_count() == self.tabs.len()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -47,7 +68,9 @@ fn read_all() -> HashMap<PathBuf, SavedGrid> {
 
 /// The grid saved for `project`, if any.
 pub fn load(project: &Path) -> Option<SavedGrid> {
-    read_all().remove(project).filter(|grid| !grid.tabs.is_empty() && grid.shape.tab_count() == grid.tabs.len())
+    let mut grid = read_all().remove(project)?;
+    grid.pages.retain(SavedPage::fits);
+    (grid.shape.tab_count() == grid.tabs.len() && (!grid.tabs.is_empty() || !grid.pages.is_empty())).then_some(grid)
 }
 
 /// Saves `project`'s grid, or forgets it when `grid` is `None` (the last tab closed).
