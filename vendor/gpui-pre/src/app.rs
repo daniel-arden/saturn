@@ -1348,15 +1348,20 @@ impl App {
         &mut self,
         callback: impl FnOnce(&mut App) -> R,
     ) -> (R, FxHashSet<EntityId>) {
-        let accessed_entities_start = self.entities.accessed_entities.get_mut().clone();
+        // Saturn's patch: cached subtrees must retain every dependency they read,
+        // including entities already read by a parent or sibling this frame.
+        // A set difference loses those dependencies after the subtree is replayed.
+        let accessed_entities_start = std::mem::take(self.entities.accessed_entities.get_mut());
         let result = callback(self);
         let entities_accessed_in_callback = self
             .entities
             .accessed_entities
             .get_mut()
-            .difference(&accessed_entities_start)
-            .copied()
-            .collect::<FxHashSet<EntityId>>();
+            .clone();
+        self.entities
+            .accessed_entities
+            .get_mut()
+            .extend(accessed_entities_start);
         (result, entities_accessed_in_callback)
     }
 
