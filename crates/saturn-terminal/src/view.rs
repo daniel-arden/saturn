@@ -124,6 +124,7 @@ impl TerminalView {
         terminal: Terminal,
         output: async_channel::Receiver<PtyEvent>,
         cwd: &Path,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         cx.spawn(async move |this, cx| {
@@ -139,9 +140,13 @@ impl TerminalView {
             }
         })
         .detach();
+        let focus = cx.focus_handle();
+        // Cached terminal frames must still update the cursor when keyboard focus changes.
+        cx.on_focus(&focus, window, |_, _, cx| cx.notify()).detach();
+        cx.on_blur(&focus, window, |_, _, cx| cx.notify()).detach();
         Self {
             terminal,
-            focus: cx.focus_handle(),
+            focus,
             title: None,
             state: AgentState::Shell,
             message: None,
