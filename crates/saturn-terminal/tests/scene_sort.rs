@@ -1,20 +1,23 @@
 //! Keep the renderer's optimized glyph sort identical to stable paint ordering.
-use gpui_kit::{AtlasTextureId, AtlasTextureKind, AtlasTile, Bounds, MonochromeSprite, Scene, TileId};
+use gpui_kit::{
+    AtlasTextureId, AtlasTextureKind, AtlasTile, Bounds, ContentMask, Hsla, MonochromeSprite, Scene, TileId,
+    TransformationMatrix,
+};
 
 fn sprite(index: u32, order: u32, tile: u32) -> MonochromeSprite {
     MonochromeSprite {
         order,
         pad: index,
         bounds: Bounds::default(),
-        content_mask: Default::default(),
-        color: Default::default(),
+        content_mask: ContentMask::default(),
+        color: Hsla::default(),
         tile: AtlasTile {
             texture_id: AtlasTextureId { index: 0, kind: AtlasTextureKind::Monochrome },
             tile_id: TileId(tile),
             padding: 0,
             bounds: Bounds::default(),
         },
-        transformation: Default::default(),
+        transformation: TransformationMatrix::default(),
     }
 }
 

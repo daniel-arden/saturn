@@ -6,7 +6,8 @@ what's under it frosted; drop shadows that stay outside their element; transluce
 stack instead of adding up, so a see-through window stays see-through; the window's macOS blur
 kept as the whole sidebar material (fill, clamp, tint, saturation) instead of a bare blur;
 lists that keep their items' heights as hints when their width changes, so a diff review scrolls;
-and stable glyph sorting through compact keys to reduce CPU memory copies.
+and glyphs sorted by small keys instead of moving each 112-byte glyph, which is cheaper on most
+frames.
 The root `Cargo.toml` points Saturn at these copies with `[patch.crates-io]`; the workspace
 excludes them, so Saturn's lints and formatter leave them alone. `gpui-pre`'s examples were left
 out.
@@ -18,9 +19,10 @@ written against this version of GPUI. Every change is marked "Saturn's patch":
 - `gpui-pre/src/scene.rs`: the `BackdropBlur` primitive, its list in `Scene`, and
   `PrimitiveBatch::BackdropBlurs`. The same file is copied to `gpui-pre-apple/vendor/gpui/src/`,
   where the build script reads it to generate the shader header.
-- `gpui-pre/src/scene.rs`: monochrome glyph sorting uses compact keys/indices, preserves stable
-  paint order, and skips sorting already ordered frames. The regression test and manual release
-  benchmark are in `crates/saturn-terminal/tests/scene_sort.rs`.
+- `gpui-pre/src/scene.rs` (and its copy): monochrome glyphs are sorted by cached keys, in the same
+  stable paint order, and a frame already in order isn't sorted at all. The test that holds it to
+  the original order, and a benchmark to run by hand, are in
+  `crates/saturn-terminal/tests/scene_sort.rs`.
 - `gpui-pre/src/window.rs`: `Window::paint_backdrop_blur`.
 - `gpui-pre-apple/build.rs`: exports `BackdropBlur` and `BackdropBlurInputIndex` to the header.
 - `gpui-pre-apple/src/metal_renderer.rs`: the layer's texture stays readable; a blur batch copies
