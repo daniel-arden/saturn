@@ -159,8 +159,8 @@ pub fn commands() -> Vec<(&'static str, &'static str, Box<dyn gpui_kit::Action>)
         ("Split right", "columns-2", Box::new(SplitRight)),
         ("Split down", "rows-2", Box::new(SplitDown)),
         ("Close terminal", "x", Box::new(CloseTab)),
-        ("Next tab", "square-arrow-right", Box::new(NextTab)),
-        ("Previous tab", "arrow-left", Box::new(PreviousTab)),
+        ("Next pane", "square-arrow-right", Box::new(NextTab)),
+        ("Previous pane", "arrow-left", Box::new(PreviousTab)),
         ("Maximise the pane", "maximize-2", Box::new(ToggleMaximize)),
         ("Even out the panes", "columns-2", Box::new(EvenOutPanes)),
         ("Go to the next agent that needs you", "bot", Box::new(NextAttention)),
@@ -209,7 +209,8 @@ impl Panels {
 
 #[derive(Clone, Copy)]
 pub enum Placement {
-    Tab,
+    /// Wherever new panes go: the grid's first, or to the right of the focused one.
+    New,
     Right,
     Down,
 }
@@ -1385,7 +1386,7 @@ impl Workspace {
         }
         self.select_project(project, window, cx);
         if self.layout.is_empty() {
-            self.open_terminal(Placement::Tab, window, cx);
+            self.open_terminal(Placement::New, window, cx);
         }
         self.save_session(cx);
     }
@@ -2957,7 +2958,7 @@ impl Workspace {
         let cwd = pane_folder.filter(|folder| folder.starts_with(&self.root)).unwrap_or_else(|| self.root.clone());
         let tab = self.spawn_terminal(&cwd, window, cx)?;
         match placement {
-            Placement::Tab => self.layout.add_tab(tab, None),
+            Placement::New => self.layout.add_tab(tab, None),
             Placement::Right => self.layout.split_right(tab, None),
             Placement::Down => self.layout.split_down(tab, None),
         }
@@ -3416,15 +3417,9 @@ impl Workspace {
         self.after_layout_change(window, cx);
     }
 
-    fn drop_tab(
-        &mut self,
-        tab: TabId,
-        cell: CellId,
-        index: Option<usize>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.update_layout(window, cx, |layout| layout.move_tab(tab, cell, index));
+    /// A pane's tab dropped on another pane's tab or middle: the two trade places.
+    fn drop_tab(&mut self, tab: TabId, cell: CellId, window: &mut Window, cx: &mut Context<Self>) {
+        self.update_layout(window, cx, |layout| layout.swap(tab, cell));
     }
 
     /// Where a tab being dragged over `cell_id` would land. Every pane hears every move of a drag;
@@ -3444,13 +3439,13 @@ impl Workspace {
         }
     }
 
-    /// A tab dropped on a pane: split the pane on the side it landed, or move into it.
+    /// A tab dropped on a pane: its pane moves to the side it landed, or trades places with it.
     fn drop_on_pane(&mut self, tab: TabId, cell_id: CellId, window: &mut Window, cx: &mut Context<Self>) {
         let side = self.drop_target.filter(|(cell, _)| *cell == cell_id).and_then(|(_, side)| side);
         self.drop_target = None;
         match side {
             Some(side) => self.update_layout(window, cx, |layout| layout.split_with(tab, cell_id, side)),
-            None => self.drop_tab(tab, cell_id, None, window, cx),
+            None => self.drop_tab(tab, cell_id, window, cx),
         }
     }
 
@@ -3539,7 +3534,7 @@ impl Workspace {
             .on_drag(DraggedTab { tab, name }, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
             .drag_over::<DraggedTab>(|style, _, _, _| style.border_l_2().border_color(theme::color(color::BLUE)))
             .on_drop(cx.listener(move |this, dragged: &DraggedTab, window, cx| {
-                this.drop_tab(dragged.tab, cell_id, Some(index), window, cx);
+                this.drop_tab(dragged.tab, cell_id, window, cx);
             }))
             .into_any_element()
     }
@@ -3822,7 +3817,7 @@ impl Workspace {
         )
     }
 
-    /// The right of a pane's tab strip: its ticket and pull request, then split, new tab and the
+    /// The right of a pane's tab strip: its ticket and pull request, then split and the
     /// pane's menu. In a narrow pane the chips are cut off, never the buttons: the menu is where the
     /// pane's other features are found.
     fn render_pane_actions(&self, cell: &Cell, cx: &mut Context<Self>) -> impl IntoElement {
@@ -3837,7 +3832,7 @@ impl Workspace {
                 Placement::Down => {
                     button.tooltip(chrome::tip_for("Split down: a new terminal below this one", SplitDown))
                 }
-                Placement::Tab => button.tooltip(chrome::tip_for("New terminal, as a tab here", NewTab)),
+                Placement::New => button.tooltip(chrome::tip_for("New terminal", NewTab)),
             }
         };
 
@@ -3857,7 +3852,6 @@ impl Workspace {
             .gap(len(space::SPACE_1))
             .child(header_button("split-right", "columns-2", Placement::Right, cx))
             .child(header_button("split-down", "rows-2", Placement::Down, cx))
-            .child(header_button("new-tab", "plus", Placement::Tab, cx))
             .child(
                 self.with_menu(
                     OpenMenu::Pane(cell_id),
@@ -4051,7 +4045,7 @@ impl Workspace {
                             .overflow_x_scroll()
                             .children((0..cell.tabs.len()).map(|index| self.render_tab(cell, index, cx)))
                             .on_drop(cx.listener(move |this, dragged: &DraggedTab, window, cx| {
-                                this.drop_tab(dragged.tab, cell_id, None, window, cx);
+                                this.drop_tab(dragged.tab, cell_id, window, cx);
                             })),
                     )
                     .child(self.render_pane_actions(cell, cx)),
@@ -4450,7 +4444,7 @@ impl Workspace {
             chrome::empty_grid(
                 &name,
                 cx.listener(|this, _, window, cx| {
-                    this.open_terminal(Placement::Tab, window, cx);
+                    this.open_terminal(Placement::New, window, cx);
                 }),
             )
         } else {
@@ -4668,7 +4662,7 @@ impl Render for Workspace {
             .map(|element| Self::palette_actions(element, cx))
             .map(|element| Self::clipboard_actions(element, cx))
             .on_action(cx.listener(|this, _: &NewTab, window, cx| {
-                this.open_terminal(Placement::Tab, window, cx);
+                this.open_terminal(Placement::New, window, cx);
             }))
             .on_action(cx.listener(|this, _: &SplitRight, window, cx| {
                 this.open_terminal(Placement::Right, window, cx);
@@ -4682,11 +4676,11 @@ impl Render for Workspace {
                 }
             }))
             .on_action(
-                cx.listener(|this, _: &NextTab, window, cx| this.update_layout(window, cx, |l| l.cycle_tab(true))),
+                cx.listener(|this, _: &NextTab, window, cx| this.update_layout(window, cx, |l| l.cycle_pane(true))),
             )
-            .on_action(
-                cx.listener(|this, _: &PreviousTab, window, cx| this.update_layout(window, cx, |l| l.cycle_tab(false))),
-            )
+            .on_action(cx.listener(|this, _: &PreviousTab, window, cx| {
+                this.update_layout(window, cx, |l| l.cycle_pane(false));
+            }))
             .on_action(cx.listener(|this, _: &FocusLeft, window, cx| {
                 this.update_layout(window, cx, |l| l.focus_direction(Direction::Left));
             }))

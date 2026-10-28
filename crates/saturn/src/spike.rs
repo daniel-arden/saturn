@@ -80,7 +80,7 @@ pub fn placement(index: usize, panes: usize) -> Placement {
     };
     let per_row = panes.div_ceil(rows);
     match index {
-        0 => Placement::Tab,
+        0 => Placement::New,
         i if i % per_row == 0 => Placement::Down,
         _ => Placement::Right,
     }

@@ -31,7 +31,7 @@ and a clear signal when an agent needs you.
 
 ## Why
 
-One agent is a terminal tab. Five are a juggling act: which one finished, which one waits for a
+One agent is a terminal. Five are a juggling act: which one finished, which one waits for a
 permission, which one broke the build. Saturn puts them on one screen, tells you where to look, and
 keeps the files and diffs they touch one click away. It isn't an IDE; it's where the agents live.
 

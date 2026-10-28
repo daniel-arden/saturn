@@ -45,7 +45,7 @@ impl AppView {
                 }
                 None => {
                     if !workspace.restore(window, cx) {
-                        workspace.open_terminal(Placement::Tab, window, cx);
+                        workspace.open_terminal(Placement::New, window, cx);
                     }
                 }
             }

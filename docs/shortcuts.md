@@ -4,12 +4,12 @@
 | ------------ | ---------------------------------------------------- |
 | ⌘P           | Go to a file, by name or path                        |
 | ⌘⇧P          | Command palette: every command by name               |
-| ⌘N           | New tab in the focused pane                          |
+| ⌘N           | New terminal, in a pane beside the focused one       |
 | ⌘D / ⌘⇧D     | Split right / down                                   |
-| ⌘W           | Close tab                                            |
+| ⌘W           | Close the terminal                                   |
 | ⌘1 … ⌘9      | Focus pane 1 to 9                                    |
 | ⌘⌥ + arrows  | Move focus between panes                             |
-| ⌘⇧[ / ⌘⇧]    | Previous / next tab                                  |
+| ⌘⇧[ / ⌘⇧]    | Previous / next pane                                 |
 | ⌘⇧↩          | Maximise the focused pane                            |
 | ⌘⌃=          | Even out the panes: every row and pane the same size |
 | ⌘⇧A          | Jump to the next agent that needs you                |

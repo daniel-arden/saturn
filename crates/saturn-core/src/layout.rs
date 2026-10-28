@@ -119,7 +119,8 @@ impl Layout {
     }
 
     /// A grid of `shape`, filled with `tabs` in order. Cells left without tabs (too few given)
-    /// are dropped, and so are rows left without cells.
+    /// are dropped, and so are rows left without cells. A cell saved with several tabs, from
+    /// before each pane held one terminal, becomes as many panes side by side in its place.
     pub fn from_shape(shape: &Shape, tabs: &[TabId]) -> Self {
         let mut layout = Self::default();
         let mut next = tabs.iter().copied();
@@ -128,14 +129,15 @@ impl Layout {
             let mut cells = Vec::new();
             for (cell_index, cell_shape) in row_shape.cells.iter().enumerate() {
                 let cell_tabs: Vec<TabId> = next.by_ref().take(cell_shape.tabs).collect();
-                let Some(&first) = cell_tabs.first() else { continue };
-                let mut cell = layout.new_cell(first, cell_shape.size);
-                cell.active = *cell_tabs.get(cell_shape.active).unwrap_or(&first);
-                cell.tabs = cell_tabs;
-                if shape.focused == Some((row_index, cell_index)) {
-                    focused = Some(cell.id);
+                #[expect(clippy::cast_precision_loss, reason = "a cell held a handful of tabs")]
+                let each = cell_shape.size / cell_tabs.len().max(1) as f32;
+                for (index, tab) in cell_tabs.into_iter().enumerate() {
+                    let cell = layout.new_cell(tab, each);
+                    if shape.focused == Some((row_index, cell_index)) && index == cell_shape.active {
+                        focused = Some(cell.id);
+                    }
+                    cells.push(cell);
                 }
-                cells.push(cell);
             }
             if !cells.is_empty() {
                 let id = RowId(layout.new_id());
@@ -227,21 +229,17 @@ impl Layout {
         self.cells().filter(|cell| self.maximized.is_none_or(|max| max == cell.id)).map(|cell| cell.active).collect()
     }
 
-    /// Adds a tab to a cell (the focused one by default) right after its active tab.
+    /// Adds a pane for a tab: the grid's first, or to the right of a cell (the focused one by
+    /// default). Every pane holds one terminal.
     pub fn add_tab(&mut self, tab: TabId, cell: Option<CellId>) {
-        let Some(at) = self.target(cell) else {
-            let cell = self.new_cell(tab, 1.0);
-            let id = RowId(self.new_id());
-            self.focused = Some(cell.id);
-            self.maximized = None;
-            self.rows = vec![Row { id, cells: vec![cell], size: 1.0 }];
-            return;
-        };
-        let target = self.cell_at(at);
-        let index = target.tabs.iter().position(|t| *t == target.active).map_or(0, |i| i + 1);
-        target.tabs.insert(index, tab);
-        target.active = tab;
-        self.focused = Some(target.id);
+        if self.target(cell).is_some() {
+            return self.split_right(tab, cell);
+        }
+        let cell = self.new_cell(tab, 1.0);
+        let id = RowId(self.new_id());
+        self.focused = Some(cell.id);
+        self.maximized = None;
+        self.rows = vec![Row { id, cells: vec![cell], size: 1.0 }];
     }
 
     /// Opens a tab in a new cell to the right of a cell; the row's panes share its width evenly.
@@ -333,18 +331,18 @@ impl Layout {
     }
 
     /// Moves a tab into a cell (or to another position in its own), making it active there.
-    pub fn move_tab(&mut self, tab: TabId, to: CellId, index: Option<usize>) {
-        let (Some(from), Some(_)) = (self.position_of_tab(tab), self.position(to)) else { return };
-        if self.rows[from.row].cells[from.cell].id == to {
-            self.cell_at(from).tabs.retain(|t| *t != tab);
-        } else {
-            self.remove_tab(tab);
+    /// Trades the places of a tab's pane and `to`: what a pane dropped on another's middle does.
+    pub fn swap(&mut self, tab: TabId, to: CellId) {
+        let (Some(from), Some(at)) = (self.position_of_tab(tab), self.position(to)) else { return };
+        if from == at {
+            return;
         }
-        let Some(at) = self.position(to) else { return };
-        let cell = self.cell_at(at);
-        let index = index.unwrap_or(cell.tabs.len()).min(cell.tabs.len());
-        cell.tabs.insert(index, tab);
-        cell.active = tab;
+        let other = self.cell_at(at).active;
+        for (position, holds) in [(from, other), (at, tab)] {
+            let cell = self.cell_at(position);
+            cell.tabs = vec![holds];
+            cell.active = holds;
+        }
         self.focused = Some(to);
     }
 
@@ -371,14 +369,19 @@ impl Layout {
         }
     }
 
-    /// Next or previous tab in the focused cell, wrapping around.
-    pub fn cycle_tab(&mut self, forward: bool) {
-        let Some(at) = self.target(None) else { return };
-        let cell = self.cell_at(at);
-        let len = cell.tabs.len();
-        let index = cell.tabs.iter().position(|t| *t == cell.active).unwrap_or(0);
-        let next = if forward { (index + 1) % len } else { (index + len - 1) % len };
-        cell.active = cell.tabs[next];
+    /// The next or previous pane in reading order, wrapping around.
+    pub fn cycle_pane(&mut self, forward: bool) {
+        let order: Vec<CellId> = self.cells().map(|cell| cell.id).collect();
+        let len = order.len();
+        if len == 0 {
+            return;
+        }
+        let index = self.focused.and_then(|focused| order.iter().position(|id| *id == focused)).unwrap_or(0);
+        let next = order[if forward { (index + 1) % len } else { (index + len - 1) % len }];
+        self.focused = Some(next);
+        if self.maximized.is_some() {
+            self.maximized = Some(next);
+        }
     }
 
     /// Moves focus to the neighbouring cell; up and down pick the cell most directly above or below.
@@ -493,14 +496,30 @@ mod tests {
     }
 
     #[test]
-    fn adds_a_tab_after_the_active_one() {
+    fn a_new_tab_is_a_pane_of_its_own() {
         let mut layout = Layout::default();
         layout.add_tab(A, None);
         layout.add_tab(B, None);
-        layout.activate_tab(A);
+        layout.focus_nth(1);
         layout.add_tab(C, None);
-        assert_eq!(shape(&layout), [[[1, 3, 2]]]);
+        assert_eq!(shape(&layout), [[[1], [3], [2]]]);
         assert_eq!(layout.focused_tab(), Some(C));
+    }
+
+    #[test]
+    fn a_cell_saved_with_several_tabs_opens_as_that_many_panes() {
+        let saved = Shape {
+            rows: vec![RowShape {
+                size: 1.0,
+                cells: vec![CellShape { size: 0.4, tabs: 1, active: 0 }, CellShape { size: 0.6, tabs: 3, active: 1 }],
+            }],
+            focused: Some((0, 1)),
+        };
+        let layout = Layout::from_shape(&saved, &[A, B, C, D]);
+        assert_eq!(shape(&layout), [[[1], [2], [3], [4]]]);
+        assert_eq!(layout.focused_tab(), Some(C));
+        let sizes: Vec<f32> = layout.rows[0].cells.iter().map(|c| c.size).collect();
+        assert!((sizes[1] - 0.2).abs() < 1e-6, "{sizes:?}");
     }
 
     #[test]
@@ -577,10 +596,10 @@ mod tests {
 
     #[test]
     fn a_dragged_tab_splits_a_cell_on_the_side_it_lands() {
-        // A cell with two tabs: dragging the second to its own right edge splits it in two.
+        // B dropped on A's right edge: it moves there, and its old pane goes.
         let mut layout = Layout::default();
         layout.add_tab(A, None);
-        layout.add_tab(B, None);
+        layout.split_down(B, None);
         let first = layout.rows[0].cells[0].id;
         layout.split_with(B, first, Direction::Right);
         assert_eq!(shape(&layout), [[[1], [2]]]);
@@ -605,18 +624,6 @@ mod tests {
         let only = layout.rows[0].cells[0].id;
         layout.split_with(A, only, Direction::Right);
         assert_eq!(shape(&layout), [[[1]]]);
-    }
-
-    #[test]
-    fn activates_the_previous_tab_when_the_active_one_closes() {
-        let mut layout = Layout::default();
-        layout.add_tab(A, None);
-        layout.add_tab(B, None);
-        layout.add_tab(C, None);
-        layout.activate_tab(B);
-        layout.remove_tab(B);
-        assert_eq!(shape(&layout), [[[1, 3]]]);
-        assert_eq!(layout.focused_tab(), Some(A));
     }
 
     #[test]
@@ -650,37 +657,15 @@ mod tests {
     }
 
     #[test]
-    fn moves_a_tab_into_another_cell_and_focuses_it_there() {
-        let mut layout = Layout::default();
-        layout.add_tab(A, None);
-        layout.add_tab(B, None);
-        layout.split_right(C, None);
-        let target = cell_of(&layout, C);
-        layout.move_tab(A, target, Some(0));
-        assert_eq!(shape(&layout), vec![vec![vec![2], vec![1, 3]]]);
-        assert_eq!(layout.focused_tab(), Some(A));
-    }
-
-    #[test]
-    fn removes_the_source_cell_when_its_last_tab_moves_away() {
+    fn a_pane_dropped_on_another_trades_places_with_it() {
         let mut layout = Layout::default();
         layout.add_tab(A, None);
         layout.split_right(B, None);
-        let target = cell_of(&layout, B);
-        layout.move_tab(A, target, None);
-        assert_eq!(shape(&layout), [[[2, 1]]]);
-        assert_eq!(layout.focused, Some(target));
-    }
-
-    #[test]
-    fn reorders_within_a_cell() {
-        let mut layout = Layout::default();
-        layout.add_tab(A, None);
-        layout.add_tab(B, None);
-        layout.add_tab(C, None);
-        let cell = cell_of(&layout, C);
-        layout.move_tab(C, cell, Some(0));
-        assert_eq!(shape(&layout), [[[3, 1, 2]]]);
+        layout.split_down(C, None);
+        let target = cell_of(&layout, C);
+        layout.swap(A, target);
+        assert_eq!(shape(&layout), vec![vec![vec![3], vec![2]], vec![vec![1]]]);
+        assert_eq!(layout.focused_tab(), Some(A));
     }
 
     #[test]
@@ -691,7 +676,7 @@ mod tests {
         layout.split_down(C, None);
         layout.add_tab(D, None);
         let target = cell_of(&layout, D);
-        layout.move_tab(B, target, Some(1));
+        layout.swap(B, target);
         let mut tabs: Vec<u64> = layout.tabs().map(|t| t.0).collect();
         tabs.sort_unstable();
         assert_eq!(tabs, [1, 2, 3, 4]);
@@ -746,13 +731,13 @@ mod tests {
     }
 
     #[test]
-    fn cycles_tabs_in_the_focused_cell() {
-        let mut layout = Layout::default();
-        layout.add_tab(A, None);
-        layout.add_tab(B, None);
-        layout.cycle_tab(true);
+    fn cycles_through_the_panes() {
+        let mut layout = grid();
+        layout.cycle_pane(false);
+        assert_eq!(layout.focused_tab(), Some(E));
+        layout.cycle_pane(true);
         assert_eq!(layout.focused_tab(), Some(A));
-        layout.cycle_tab(false);
+        layout.cycle_pane(true);
         assert_eq!(layout.focused_tab(), Some(B));
     }
 

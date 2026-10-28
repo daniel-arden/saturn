@@ -11,7 +11,7 @@ Saturn runs [Claude Code](https://claude.com/claude-code) and
 [Codex](https://developers.openai.com/codex), side by side if you have both; see
 [Claude Code and Codex](agents.md) for how it works with each.
 
-Each tab shows whether its agent is working, waiting for you, done or failed.
+Each pane shows whether its agent is working, waiting for you, done or failed.
 
 - A pane that needs you rings **orange**, one that's done rings **green**, until you type or click
   in it.
@@ -66,8 +66,10 @@ Each tab shows whether its agent is working, waiting for you, done or failed.
 
 ## Terminals
 
-- Split right (⌘D) or down (⌘⇧D), or drag a tab onto a pane's edge to split it there. Tabs in every
-  pane. Maximise the focused pane over everything with its button or ⌘⇧↩. Panes share the space
+- Every terminal is a pane of its own, with its session's name at the top; there are no tabs
+  inside panes. Split right (⌘D) or down (⌘⇧D); ⌘N opens a pane beside the focused one. Drag a
+  pane by its name onto another's edge to move it there, or onto its middle to swap the two.
+  Maximise the focused pane over everything with its button or ⌘⇧↩. Panes share the space
   evenly whenever one opens or closes; drag a divider to change that, or double-click it to even
   out its two panes. ⌘⌃= evens out them all.
 - A real terminal underneath (alacritty's engine), so TUIs, colours and the mouse work as they should.

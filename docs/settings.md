@@ -19,7 +19,7 @@ panels (sidebar, editor, tickets) were showing, so Saturn opens with the same on
   step, the session's limit), in Saturn and in any other terminal; turning it on keeps the one you
   had, to put back. What starts each agent, `claude` and `codex` or an alias of your own (`cdsk`, say):
   Saturn types what it needs after it, so a resumed session is `cdsk --resume …`. Codex's status line (its own items: model, folder, branch, context, limits), in
-  the Codex sessions Saturn starts. Tabs named after Claude's session (a name you type yourself always wins); sessions
+  the Codex sessions Saturn starts. Panes named after Claude's session (a name you type yourself always wins); sessions
   named after tickets, so `/start abc-224` renames the session to `ABC-224`, as `/rename ABC-224`
   would. Tickets mentioned in normal prompts never rename anything.
 - **Keyboard shortcuts**: click one and press the keys you want; a shortcut that had them gives them
