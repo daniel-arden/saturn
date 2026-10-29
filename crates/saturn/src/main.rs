@@ -109,6 +109,13 @@ pub fn set_menus(cx: &mut App) {
             MenuItem::action("Open Project…", OpenProject),
             MenuItem::action("Save", SaveFile),
         ]),
+        Menu::new("Workspaces").items([
+            MenuItem::action("New Workspace…", crate::app_view::CreateWorkspace),
+            MenuItem::action("Next Workspace", crate::app_view::NextWorkspace),
+            MenuItem::action("Previous Workspace", crate::app_view::PreviousWorkspace),
+            MenuItem::action("Edit Workspace…", crate::app_view::EditWorkspace),
+            MenuItem::action("Remove Workspace…", crate::app_view::RemoveWorkspace),
+        ]),
         Menu::new("Terminal").items([
             MenuItem::action("New Tab", NewTab),
             MenuItem::action("New Agent…", OpenTicketPicker),
@@ -159,6 +166,7 @@ pub fn set_menus(cx: &mut App) {
             MenuItem::action("Problems", ShowProblems),
         ]),
         Menu::new("View").items([
+            MenuItem::action("Show or Hide Project Tabs", crate::workspace::ToggleProjectTabs),
             MenuItem::action("Command Palette…", CommandPalette),
             MenuItem::separator(),
             MenuItem::action("Toggle Sidebar", ToggleSidebar),

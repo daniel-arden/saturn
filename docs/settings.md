@@ -28,3 +28,7 @@ panels (sidebar, editor, tickets) were showing, so Saturn opens with the same on
   commands a ticket starts, one for each agent (`claude -n {ticket}` and `codex` by default;
   `claude -n {ticket} "/start {ticket}"` sends the agent a first message, so it starts working at
   once) and whether it gets its own worktree.
+
+### Project tabs
+
+Appearance → Project tabs chooses Top (default) or Side for repos in a workspace. Named workspaces are managed from the workspace bar and Workspaces menu. Their layout and editor drafts are saved separately from global settings. Existing workspace and session data is backed up before the first write.

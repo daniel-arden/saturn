@@ -73,6 +73,7 @@ actions!(
         NextAttention,
         Paste,
         Copy,
+        ToggleProjectTabs,
         ToggleSidebar,
         ToggleEditor,
         OpenProject,
@@ -125,6 +126,11 @@ thread_local! {
         const { std::cell::RefCell::new(Vec::new()) };
 }
 
+/// An empty workspace has no target for workspace-specific menu actions.
+pub(crate) fn hide_workspace(window: &Window) {
+    OPEN.with_borrow_mut(|open| open.retain(|(handle, _)| *handle != window.window_handle()));
+}
+
 /// Runs `act` on the workspace of the window in front, if it has one: for shortcuts that arrive
 /// while nothing in the window has the keyboard.
 pub fn in_front(cx: &mut gpui_kit::App, act: impl FnOnce(&mut Workspace, &mut Window, &mut Context<Workspace>)) {
@@ -155,6 +161,11 @@ pub fn in_any(cx: &mut gpui_kit::App, act: impl FnOnce(&mut Workspace, &mut Wind
 /// shortcut the palette shows).
 pub fn commands() -> Vec<(&'static str, &'static str, Box<dyn gpui_kit::Action>)> {
     vec![
+        ("New workspace", "plus", Box::new(crate::app_view::CreateWorkspace)),
+        ("Next workspace", "arrow-right", Box::new(crate::app_view::NextWorkspace)),
+        ("Previous workspace", "arrow-left", Box::new(crate::app_view::PreviousWorkspace)),
+        ("Edit workspace", "pencil", Box::new(crate::app_view::EditWorkspace)),
+        ("Remove workspace", "x", Box::new(crate::app_view::RemoveWorkspace)),
         ("Go to file", "search", Box::new(GoToFile)),
         ("New terminal", "plus", Box::new(NewTab)),
         ("Split right", "columns-2", Box::new(SplitRight)),
@@ -171,6 +182,7 @@ pub fn commands() -> Vec<(&'static str, &'static str, Box<dyn gpui_kit::Action>)
         ("Compare attempts", "git-compare", Box::new(CompareAttempts)),
         ("Search sessions and resume one", "text-search", Box::new(SearchSessions)),
         ("Routines: agents on a schedule", "calendar-clock", Box::new(ShowRoutines)),
+        ("Show or hide project tabs", "folder", Box::new(ToggleProjectTabs)),
         ("Show or hide the sidebar", "panel-left", Box::new(ToggleSidebar)),
         ("Show or hide the editor", "panel-top", Box::new(ToggleEditor)),
         ("Show or hide your tickets", "panel-right", Box::new(ToggleTickets)),
@@ -274,9 +286,16 @@ impl Render for DividerPreview {
     }
 }
 
+#[expect(clippy::struct_excessive_bools, reason = "independent lifecycle and workspace display switches")]
 pub struct Workspace {
     /// The repos this window holds, in the sidebar's order. The first names the saved session.
     projects: Vec<PathBuf>,
+    session_anchor: PathBuf,
+    repo_tabs_open: bool,
+    sidebar_size: f32,
+    editor_size: f32,
+    sidebar_resize: Entity<gpui_kit::component::resizable::ResizableState>,
+    editor_resize: Entity<gpui_kit::component::resizable::ResizableState>,
     /// The selected repo: where new tabs and ticket worktrees go, and whose ticket settings apply.
     project: PathBuf,
     layout: Layout,
@@ -1042,6 +1061,7 @@ impl Workspace {
         .detach();
     }
 
+    #[expect(clippy::too_many_lines, reason = "workspace setup includes independent panel resize state")]
     pub fn new(project: PathBuf, window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self::keep_fresh(window, cx);
         // Pane sizes change by dragging, which saves nothing on its own; quitting saves them, and
@@ -1049,7 +1069,7 @@ impl Workspace {
         cx.on_app_quit(|this, cx| {
             this.save_session(cx);
             this.remember_panels(cx);
-            session::remember_open_window(&this.projects[0]);
+            // AppView remembers only the visible workspace for window restoration.
             async {}
         })
         .detach();
@@ -1132,6 +1152,12 @@ impl Workspace {
             // Off to begin with: the sidebar stays on the repo until you ask it to follow panes.
             follow_pane: false,
             editor,
+            session_anchor: project.clone(),
+            repo_tabs_open: true,
+            sidebar_size: 270.,
+            editor_size: 260.,
+            sidebar_resize: resize_state(cx),
+            editor_resize: resize_state(cx),
             projects: vec![project.clone()],
             project,
             layout: Layout::default(),
@@ -1324,6 +1350,35 @@ impl Workspace {
     }
 
     /// The selected repo.
+    fn toggle_project_tabs(&mut self, cx: &mut Context<Self>) {
+        self.repo_tabs_open = !self.repo_tabs_open;
+        self.save_session(cx);
+        cx.notify();
+    }
+
+    pub(crate) fn session_anchor(&self) -> &Path {
+        &self.session_anchor
+    }
+
+    pub(crate) fn activate_workspace(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use gpui_kit::Focusable as _;
+        let handle = window.window_handle();
+        OPEN.with_borrow_mut(|open| {
+            open.retain(|(w, _)| *w != handle);
+            open.push((handle, cx.weak_entity()));
+        });
+        if let Some(view) = self.focused_view() {
+            window.focus(&view.read(cx).focus_handle(cx), cx);
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn stop_terminals(&mut self, cx: &mut Context<Self>) {
+        for terminal in self.terminals.values() {
+            terminal.update(cx, |view, _| view.kill());
+        }
+    }
+
     pub fn project_path(&self) -> &Path {
         &self.project
     }
@@ -1372,6 +1427,9 @@ impl Workspace {
             return;
         }
         self.projects.retain(|p| p != project);
+        if self.session_anchor == project {
+            self.session_anchor = self.projects[0].clone();
+        }
         if self.project == project {
             let first = self.projects[0].clone();
             self.select_project(first, window, cx);
@@ -3018,20 +3076,64 @@ impl Workspace {
             }
             tabs.push(tab);
         }
+        if !saved.project_order.is_empty() {
+            let mut ordered: Vec<_> =
+                saved.project_order.iter().filter(|p| self.projects.contains(p)).cloned().collect();
+            for p in &self.projects {
+                if !ordered.contains(p) {
+                    ordered.push(p.clone());
+                }
+            }
+            self.projects = ordered;
+        }
+        self.sidebar_size = saved.sidebar_width.clamp(200., 480.);
+        self.editor_size = saved.editor_height.clamp(120., 4000.);
+        self.panels.sidebar = saved.sidebar_open;
+        self.panels.editor = saved.editor_open;
+        self.repo_tabs_open = saved.repo_tabs_open;
+        if saved.tickets_open {
+            self.open_tickets(window, cx);
+        }
+        self.sidebar_tab = if saved.changes_open { SidebarTab::Changes } else { SidebarTab::Files };
+        if let Some(project) = saved.selected_project.filter(|p| self.projects.contains(p)) {
+            self.select_project(project, window, cx);
+        }
+        self.follow_pane = saved.follow_pane;
+        self.editor.update(cx, |editor, cx| editor.restore(&saved.editor, window, cx));
         if tabs.is_empty() {
             return false;
         }
         self.layout = Layout::from_shape(&saved.shape, &tabs);
+        if let Some(tab) = saved.maximized_terminal.and_then(|i| tabs.get(i)) {
+            self.layout.activate_tab(*tab);
+            self.layout.toggle_maximize();
+        }
         self.after_layout_change(window, cx);
         true
     }
 
     /// Remembers the grid for the next start.
-    fn save_session(&self, cx: &gpui_kit::App) {
+    pub(crate) fn save_session(&self, cx: &gpui_kit::App) {
         let tabs: Vec<TabId> = self.layout.tabs().collect();
-        let home = &self.projects[0];
-        let grid = (!tabs.is_empty()).then(|| SavedGrid {
-            projects: self.projects[1..].to_vec(),
+        let home = &self.session_anchor;
+        let grid = Some(SavedGrid {
+            projects: self.projects.iter().filter(|p| *p != home).cloned().collect(),
+            project_order: self.projects.clone(),
+            selected_project: Some(self.project.clone()),
+            sidebar_open: self.panels.sidebar,
+            repo_tabs_open: self.repo_tabs_open,
+            editor_open: self.panels.editor,
+            tickets_open: self.panels.tickets,
+            follow_pane: self.follow_pane,
+            changes_open: self.sidebar_tab == SidebarTab::Changes,
+            maximized_terminal: self
+                .layout
+                .cells()
+                .find(|c| Some(c.id) == self.layout.maximized)
+                .and_then(|c| tabs.iter().position(|t| *t == c.active)),
+            sidebar_width: self.sidebar_size,
+            editor_height: self.editor_size,
+            editor: self.editor.read(cx).snapshot(cx),
             shape: self.layout.shape(),
             tabs: tabs
                 .iter()
@@ -4110,6 +4212,15 @@ impl Workspace {
         chrome::on_glass(
             chrome::track()
                 .child(
+                    toggle("toggle-project-tabs", "folder", self.repo_tabs_open)
+                        .tooltip(chrome::tip_for("Show or hide project tabs", ToggleProjectTabs))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.repo_tabs_open = !this.repo_tabs_open;
+                            this.save_session(cx);
+                            cx.notify();
+                        })),
+                )
+                .child(
                     toggle("toggle-sidebar", "panel-left", panels.sidebar)
                         .tooltip(chrome::tip_for("Show or hide the sidebar", ToggleSidebar))
                         .on_click(cx.listener(|this, _, _, cx| this.toggle_sidebar(cx))),
@@ -4195,7 +4306,10 @@ impl Workspace {
             .pr(len(space::SPACE_1))
             .child(empty("titlebar-lights").flex_none().w(len(TRAFFIC_LIGHTS_WIDTH)))
             .child(self.render_panel_toggles(cx))
-            .child(self.render_repo_tabs(cx))
+            .when(
+                self.repo_tabs_open && self.settings.project_tab_position == crate::settings::ProjectTabPosition::Top,
+                |bar| bar.child(self.render_repo_tabs(cx)),
+            )
             .child(empty("titlebar-middle").flex_1())
             .children(activity)
             .child(self.render_new_agent(cx))
@@ -4293,22 +4407,37 @@ impl Workspace {
     /// (its panes stay). The ＋ after them adds one.
     fn render_repo_tabs(&self, cx: &mut Context<Self>) -> AnyElement {
         let removable = self.projects.len() > 1;
-        let mut track = chrome::track();
+        let mut track = chrome::track()
+            .when(self.settings.project_tab_position == crate::settings::ProjectTabPosition::Side, |track| {
+                track.flex_col().w_full().items_stretch()
+            });
         for (index, project) in self.projects.iter().enumerate() {
             let selected = *project == self.project;
             let name = project.file_name().map_or_else(|| "/".to_owned(), |name| name.to_string_lossy().into_owned());
             let picked = project.clone();
             let removed = project.clone();
+            let dragged = project.clone();
+            let target = project.clone();
             // Each tab its own hover group, so only the one under the mouse shows its ✕.
             let group = gpui_kit::SharedString::from(format!("repo-{index}"));
             track = track.child(
                 chrome::track_item(("repo", index), selected)
                     .h(len(TITLEBAR_CONTROL))
+                    .when(self.settings.project_tab_position == crate::settings::ProjectTabPosition::Side, |item| {
+                        item.w_full().justify_start()
+                    })
                     .relative()
                     .group(group.clone())
                     .px(len(space::SPACE_3))
                     .text_color(theme::color(if selected { color::INK } else { color::INK_MUTED }))
                     .child(name)
+                    .on_drag(dragged, |path, _, _, cx| cx.new(|_| ProjectDrag(path.clone())))
+                    .on_drop(cx.listener(move |this, source: &PathBuf, _, cx| {
+                        if saturn_core::workspaces::reorder(&mut this.projects, source, &target) {
+                            this.save_session(cx);
+                            cx.notify();
+                        }
+                    }))
                     // On hover only, floating over the tab's end, so a hidden ✕ takes no room.
                     .when(removable, |item| {
                         item.child(
@@ -4386,10 +4515,19 @@ impl Workspace {
         };
         let work = div().size_full().when(panels.sidebar, |main| main.pl(half_gap)).child(
             v_resizable("main")
+                .with_state(&self.editor_resize)
+                .on_resize(cx.listener(
+                    |this, state: &Entity<gpui_kit::component::resizable::ResizableState>, _, cx| {
+                        if let Some(size) = state.read(cx).sizes().first() {
+                            this.editor_size = f32::from(*size);
+                            this.save_session(cx);
+                        }
+                    },
+                ))
                 .with_handle_appearance(chrome::quiet_resize_handle())
                 .child(
                     resizable_panel()
-                        .size(px(260.))
+                        .size(px(self.editor_size))
                         .size_range(px(120.)..px(4000.))
                         .visible(panels.editor)
                         .child(div().size_full().pb(half_gap).child(self.editor.clone())),
@@ -4414,18 +4552,45 @@ impl Workspace {
                 .into_any_element(),
             None => work.into_any_element(),
         };
-        div().flex_1().min_h_0().child(
-            h_resizable("workbench")
-                .with_handle_appearance(chrome::quiet_resize_handle())
-                .child(
-                    resizable_panel()
-                        .size(px(270.))
-                        .size_range(px(200.)..px(480.))
-                        .visible(panels.sidebar)
-                        .child(div().size_full().pr(half_gap).child(sidebar)),
-                )
-                .child(resizable_panel().child(work)),
-        )
+        div()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .when(
+                self.repo_tabs_open && self.settings.project_tab_position == crate::settings::ProjectTabPosition::Side,
+                |row| {
+                    row.child(
+                        div()
+                            .id("side-project-tabs")
+                            .w(px(180.))
+                            .h_full()
+                            .overflow_y_scroll()
+                            .flex_none()
+                            .child(self.render_repo_tabs(cx)),
+                    )
+                },
+            )
+            .child(
+                h_resizable("workbench")
+                    .with_state(&self.sidebar_resize)
+                    .on_resize(cx.listener(
+                        |this, state: &Entity<gpui_kit::component::resizable::ResizableState>, _, cx| {
+                            if let Some(size) = state.read(cx).sizes().first() {
+                                this.sidebar_size = f32::from(*size);
+                                this.save_session(cx);
+                            }
+                        },
+                    ))
+                    .with_handle_appearance(chrome::quiet_resize_handle())
+                    .child(
+                        resizable_panel()
+                            .size(px(self.sidebar_size))
+                            .size_range(px(200.)..px(480.))
+                            .visible(panels.sidebar)
+                            .child(div().size_full().pr(half_gap).child(sidebar)),
+                    )
+                    .child(resizable_panel().child(work)),
+            )
     }
 
     fn next_attention(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -4623,6 +4788,7 @@ impl Render for Workspace {
                 this.update_layout(window, cx, Layout::even_out);
             }))
             .on_action(cx.listener(|this, _: &NextAttention, window, cx| this.next_attention(window, cx)))
+            .on_action(cx.listener(|this, _: &ToggleProjectTabs, _, cx| this.toggle_project_tabs(cx)))
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
             .on_action(cx.listener(|this, _: &ToggleEditor, _, cx| this.toggle_editor(cx)))
             .on_action(cx.listener(|_, _: &OpenProject, window, cx| Self::open_project(window, cx)))
@@ -4661,6 +4827,19 @@ impl Render for Workspace {
             .child(self.render_titlebar(cx))
             .child(self.render_workbench(cx))
             .child(self.status_bar.clone())
+    }
+}
+
+fn resize_state(cx: &mut Context<Workspace>) -> Entity<gpui_kit::component::resizable::ResizableState> {
+    cx.new(|_| gpui_kit::component::resizable::ResizableState::default())
+}
+
+struct ProjectDrag(PathBuf);
+impl Render for ProjectDrag {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .bg(theme::color(color::SURFACE))
+            .child(self.0.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned()))
     }
 }
 
