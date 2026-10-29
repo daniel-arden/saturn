@@ -178,3 +178,9 @@ tracker, New agent starts work you name, and the rest doesn't show up.
 Panes, the sidebar and the editor are cards on Saturn's own blue backdrop: deep navy in dark mode,
 soft periwinkle in light. It follows macOS's appearance, or you pick one. Terminals tell programs
 which it is when they ask, so an agent's "Auto" theme matches, and switches with it.
+
+## Named workspaces
+
+Create a workspace from the workspace bar, give it a name and color, and add repos. Switching workspaces keeps their terminals running. Edit or remove one from its controls or the Workspaces menu; removing it asks before stopping terminals. Saved sessions remain available.
+
+Workspace state restores repo order and selection, the grid, panel sizes and visibility, maximized panes, open editor files, and unsaved drafts. Draft recovery never writes over files; external changes remain available through the editor’s existing conflict controls. Drag repos to reorder them.

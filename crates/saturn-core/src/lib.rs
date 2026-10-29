@@ -49,3 +49,5 @@ pub mod usage;
 pub mod waiting;
 pub mod worktree_include;
 pub mod worktrees;
+
+pub mod workspaces;

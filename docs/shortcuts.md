@@ -24,3 +24,5 @@
 | ⌘⌥B          | Show or hide your tickets (ClickUp)                  |
 
 Every shortcut but copy, paste and quit can be changed in Settings → Keyboard shortcuts.
+
+Workspace creation, editing, removal, and next/previous navigation are available in the Workspaces menu and command palette. Existing pane shortcuts keep their current meaning; workspace actions have no default keyboard bindings.

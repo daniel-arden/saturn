@@ -183,6 +183,11 @@ impl EditorView {
                 return;
             }
         };
+        self.open_text(path, text, window, cx);
+    }
+
+    fn open_text(&mut self, path: &Path, text: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.front = Front::File;
         let language = language_for(path);
         let state = cx.new(|cx| {
             let mut state = EditorState::new(window, cx).language(language).searchable(true);
@@ -214,6 +219,45 @@ impl EditorView {
         });
         self.active = self.files.len() - 1;
         self.pull_diagnostics(self.active, Duration::ZERO, cx);
+        cx.notify();
+    }
+
+    pub fn snapshot(&self, cx: &gpui_kit::App) -> crate::session::SavedEditor {
+        crate::session::SavedEditor {
+            files: self
+                .files
+                .iter()
+                .map(|file| crate::session::SavedFile {
+                    path: file.path.clone(),
+                    draft: file.dirty(cx).then(|| file.state.read(cx).value().to_string()),
+                    base: file.dirty(cx).then(|| file.saved.clone()),
+                })
+                .collect(),
+            active: self.files.get(self.active).map(|file| file.path.clone()),
+            maximized: self.maximized,
+        }
+    }
+
+    pub fn restore(&mut self, saved: &crate::session::SavedEditor, window: &mut Window, cx: &mut Context<Self>) {
+        for file in &saved.files {
+            if file.path.is_file() {
+                self.open(&file.path, window, cx);
+            } else if file.draft.is_some() {
+                self.open_text(&file.path, file.base.clone().unwrap_or_default(), window, cx);
+            }
+            if let Some(open) = self.files.iter_mut().find(|open| open.path == file.path)
+                && let Some(draft) = &file.draft
+            {
+                let disk = std::fs::read_to_string(&file.path).ok();
+                open.saved = file.base.clone().unwrap_or_else(|| open.saved.clone());
+                open.changed_on_disk = disk.as_deref() != Some(open.saved.as_str());
+                open.state.update(cx, |state, cx| state.set_value(draft.clone(), window, cx));
+            }
+        }
+        if let Some(index) = self.files.iter().position(|file| Some(&file.path) == saved.active.as_ref()) {
+            self.active = index;
+        }
+        self.maximized = saved.maximized;
         cx.notify();
     }
 

@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 #[serde(default)]
 #[expect(clippy::struct_excessive_bools, reason = "independent on/off switches, each its own JSON field")]
 pub struct Settings {
+    pub project_tab_position: ProjectTabPosition,
     /// Projects opened before, most recent first, for the welcome screen.
     pub recent_projects: Vec<PathBuf>,
     /// The most recent project in settings written before `recent_projects` existed.
@@ -213,6 +214,7 @@ pub const TEXT_SIZES: std::ops::RangeInclusive<u16> = 9..=24;
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            project_tab_position: ProjectTabPosition::Top,
             recent_projects: Vec::new(),
             last_project: None,
             name_tabs_after_sessions: true,
@@ -403,4 +405,13 @@ mod tests {
         let titled = ProjectSettings { ticket_command: "echo {title}".to_owned(), ..ProjectSettings::default() };
         assert_eq!(titled.command_for(Agent::Claude, "ABC-1", "Don't break; rm -rf"), "echo 'Don'\\''t break; rm -rf'");
     }
+}
+
+/// Where the repos in a workspace are shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProjectTabPosition {
+    #[default]
+    Top,
+    Side,
 }

@@ -7,18 +7,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use saturn_core::agents::Agent;
-use saturn_core::layout::Shape;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SavedGrid {
-    /// The other repos the window held, after the one it's saved under.
-    #[serde(default)]
-    pub projects: Vec<PathBuf>,
-    pub shape: Shape,
-    /// One per tab, in the order the shape lists them.
-    pub tabs: Vec<SavedTab>,
-}
+pub use saturn_core::workspaces::{SavedEditor, SavedFile};
+pub type SavedGrid = saturn_core::workspaces::SavedGrid<SavedTab>;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SavedTab {
@@ -47,22 +39,36 @@ fn read_all() -> HashMap<PathBuf, SavedGrid> {
 
 /// The grid saved for `project`, if any.
 pub fn load(project: &Path) -> Option<SavedGrid> {
-    read_all().remove(project).filter(|grid| !grid.tabs.is_empty() && grid.shape.tab_count() == grid.tabs.len())
+    read_all().remove(project).filter(|grid| grid.shape.tab_count() == grid.tabs.len())
 }
 
 /// Saves `project`'s grid, or forgets it when `grid` is `None` (the last tab closed).
 pub fn save(project: &Path, grid: Option<SavedGrid>) {
     let Some(path) = file() else { return };
+    if path.exists()
+        && std::fs::read(&path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<HashMap<PathBuf, SavedGrid>>(&bytes).ok())
+            .is_none()
+    {
+        eprintln!("saturn: refusing to overwrite unreadable session data");
+        return;
+    }
     let mut all = read_all();
     match grid {
         Some(grid) => all.insert(project.to_owned(), grid),
         None => all.remove(project),
     };
+    if path.exists()
+        && !path.with_extension("json.backup").exists()
+        && std::fs::copy(&path, path.with_extension("json.backup")).is_err()
+    {
+        return;
+    }
     if let Some(dir) = path.parent()
         && std::fs::create_dir_all(dir).is_ok()
-        && let Ok(text) = serde_json::to_string_pretty(&all)
     {
-        let _ = std::fs::write(path, text);
+        let _ = write_json(&path, &all);
     }
 }
 
@@ -103,6 +109,15 @@ pub fn take_open_windows() -> Vec<PathBuf> {
 pub fn resume_command(agent: Agent, session: &str) -> Option<String> {
     // Session ids are UUIDs; anything else is not typed into a shell.
     session.chars().all(|c| c.is_ascii_hexdigit() || c == '-').then(|| agent.resume(session))
+}
+
+pub fn write_json(path: &Path, value: &impl Serialize) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::to_vec_pretty(value)?)?;
+    std::fs::rename(tmp, path)
 }
 
 #[cfg(test)]

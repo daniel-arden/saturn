@@ -303,6 +303,20 @@ impl SettingsView {
         vec![
             Row::new(
                 Section::Appearance,
+                "Project tabs",
+                "Show workspace repos along the top or the side.",
+                self.choice(
+                    "project-tabs",
+                    &[
+                        ("Top", crate::settings::ProjectTabPosition::Top),
+                        ("Side", crate::settings::ProjectTabPosition::Side),
+                    ],
+                    settings.project_tab_position,
+                    |settings, value| settings.project_tab_position = value,
+                ),
+            ),
+            Row::new(
+                Section::Appearance,
                 "Theme",
                 "Light or dark, or whichever macOS is in.",
                 self.choice(
